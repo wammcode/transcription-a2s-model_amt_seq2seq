@@ -1,0 +1,40 @@
+!!!COM:
+!!!OTL: Exercise 219
+!!!OMD: [quarter] = 85
+**kern
+*Trd-1c-2
+*clefG2
+*k[b-]
+*M3/4
+*MM85
+=1
+4.ff
+8aa
+16bb-L
+8gg
+16eeJ
+=
+4dd
+16ddL
+16ee
+16cc
+16gJ
+8gL
+8aJ
+=
+4r
+8b-L
+8ddJ
+4r
+=
+8ccL
+8eeJ
+4r
+4dd
+=
+8.ggL
+16aaJ
+2ee
+==
+*-
+!! title: @{OTL}

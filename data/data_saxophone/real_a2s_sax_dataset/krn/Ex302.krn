@@ -1,0 +1,39 @@
+!!!COM:
+!!!OTL: Ex302
+!!!OMD: [quarter] = 90
+**kern
+*Trd-1c-2
+*clefG2
+*k[]
+*M4/4
+*MM90
+=1
+4f-
+4dd-
+4a-
+4g-
+=2
+4a-
+4f-
+4r
+4d-
+=3
+4A-
+8c-L
+8d-J
+2r
+=4
+4a-
+4g-
+4f-
+4e-
+=5
+4c-
+8g-L
+8f-
+8e-
+8d-J
+4A-
+==
+*-
+!! title: @{OTL}

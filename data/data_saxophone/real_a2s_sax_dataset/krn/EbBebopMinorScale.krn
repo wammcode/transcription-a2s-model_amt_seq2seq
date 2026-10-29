@@ -1,0 +1,47 @@
+!!!COM:
+!!!OTL: Eb Bebop Minor Scale
+!!!OMD: [quarter] = 100
+**kern
+*Trd-1c-2
+*clefG2
+*k[b-e-a-d-g-]
+*M4/4
+*MM100
+=1
+8d-L
+8e-J
+8eL
+8g-J
+8a-L
+8aJ
+8cc-L
+8ccJ
+=2
+8dd-L
+8ee-J
+8eeL
+8gg-J
+8aa-L
+8aaJ
+=3
+8ccc-L
+8aaJ
+8aa-L
+8gg-J
+8eeL
+8ee-J
+8dd-L
+8ccJ
+=4
+8cc-L
+8aJ
+8a-L
+8g-J
+8eL
+8eJ
+4d-
+=5
+1d-
+==
+*-
+!! title: @{OTL}

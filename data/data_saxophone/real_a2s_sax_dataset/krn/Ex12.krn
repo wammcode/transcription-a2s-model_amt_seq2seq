@@ -1,0 +1,31 @@
+!!!COM:
+!!!OTL: Exercise 12
+!!!OMD: [quarter] = 80
+**kern
+*Trd-1c-2
+*clefG2
+*k[f#c#g#d#]
+*M3/4
+*MM80
+=1
+4aa
+8ff#L
+8gg#J
+8aaL
+8bbJ
+=2
+4ccc#
+4aa
+4ff#
+=3
+8eeL
+8gg#J
+8bbL
+8dddJ
+4ff#
+=4
+4gg#
+2ee
+==
+*-
+!! title: @{OTL}

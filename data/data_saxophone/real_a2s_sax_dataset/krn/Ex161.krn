@@ -1,0 +1,37 @@
+!!!COM:
+!!!OTL: Ex 161
+!!!OMD: [quarter] = 80
+**kern
+*Trd-1c-2
+*clefG2
+*k[]
+*M4/4
+*MM80
+=1
+4.e-
+8f-
+8g-
+8a-
+8b--L
+16dd-
+16cc-J
+=2
+4.cc-
+8a-
+4f-
+4r
+=3
+4.a-
+8b--
+8cc-
+8dd-
+8ee--L
+16gg-
+16ff-J
+=2
+4.ff-
+8dd-
+2b--
+==
+*-
+!! title: @{OTL}

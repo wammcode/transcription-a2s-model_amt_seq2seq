@@ -1,0 +1,8 @@
+# Archivos locales y temporales
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.env.*
+!.env.example

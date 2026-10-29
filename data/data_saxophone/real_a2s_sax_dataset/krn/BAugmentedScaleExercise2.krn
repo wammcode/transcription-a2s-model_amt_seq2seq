@@ -1,0 +1,38 @@
+!!!COM:
+!!!OTL: B Augmented Scale Exercise 2
+!!!OMD: [quarter] = 100
+**kern
+*Trd-1c-2
+*clefG2
+*k[f#c#g#]
+*M2/4
+*MM100
+=1
+4A
+4c
+=2
+8c#L
+8eJ
+8fL
+8g#J
+=3
+16AL
+16cL
+16c#J
+16eJ
+16fL
+16g#L
+16aJ
+16ccJ
+=4
+4ee
+4cc
+=5
+2a
+=6
+4f
+8aL
+8ccJ
+==
+*-
+!! title: @{OTL}

@@ -1,0 +1,47 @@
+!!!COM:
+!!!OTL: F Bebop Minor Scale
+!!!OMD: [quarter] = 100
+**kern
+*Trd-1c-2
+*clefG2
+*k[b-e-a-]
+*M4/4
+*MM100
+=1
+8e-L
+8fJ
+8f#L
+8a-J
+8b-L
+8bJ
+8dd-L
+8ddJ
+=2
+8ee-L
+8ffJ
+8ff#L
+8aa-J
+8bb-L
+8bbJ
+=3
+8ddd-L
+8bbJ
+8bb-L
+8aa-J
+8ff#L
+8ffJ
+8ee-L
+8ddJ
+=4
+8dd-L
+8bJ
+8b-L
+8a-J
+8f#L
+8f#J
+4e-
+=5
+1e-
+==
+*-
+!! title: @{OTL}

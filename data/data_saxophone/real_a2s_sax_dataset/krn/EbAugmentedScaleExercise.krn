@@ -1,0 +1,38 @@
+!!!COM:
+!!!OTL: Eb Augmented Scale Exercise
+!!!OMD: [quarter] = 100
+**kern
+*Trd-1c-2
+*clefG2
+*k[b-e-a-d-g-]
+*M2/4
+*MM100
+=1
+4d-
+4f-
+=2
+8fL
+8a-J
+8b--L
+8ccJ
+=3
+16d-L
+16f-L
+16fJ
+16a-J
+16b--L
+16ccL
+16dd-J
+16ff-J
+=4
+4aa-
+4ff-
+=5
+2dd-
+=6
+4b--
+8dd-L
+8ff-J
+==
+*-
+!! title: @{OTL}

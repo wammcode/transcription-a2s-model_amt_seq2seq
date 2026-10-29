@@ -1,0 +1,40 @@
+!!!COM:
+!!!OTL: Exercise 226
+!!!OMD: [quarter] = 85
+**kern
+*Trd-1c-2
+*clefG2
+*k[f#c#g#d#a#]
+*M3/4
+*MM85
+=1
+4.bb
+8ddd#
+16eeeL
+8ccc#
+16aa#J
+=
+4gg#
+16gg#L
+16aa#
+16ff#
+16cc#J
+8cc#L
+8dd#J
+=
+4r
+8eeL
+8gg#J
+4r
+=
+8ff#L
+8aa#J
+4r
+4gg#
+=
+8.ccc#L
+16ddd#J
+2aa#
+==
+*-
+!! title: @{OTL}

@@ -1,0 +1,38 @@
+!!!COM:
+!!!OTL: Ex 66
+!!!OMD: [quarter] = 80
+**kern
+*Trd-1c-2
+*clefG2
+*k[]
+*M4/4
+*MM80
+8dd-L
+8ee-J
+=1
+4gg-
+4bb-
+8gg-L
+8ee-J
+8b-L
+8g-J
+=2
+8dd-L
+8a-J
+8b-L
+8ee-J
+8gg-L
+8bb-J
+8eee-L
+8bb-J
+=3
+8cccL
+8bb--J
+8gg-L
+8ee-J
+8ccL
+8b-J
+4ee-
+==
+*-
+!! title: @{OTL}

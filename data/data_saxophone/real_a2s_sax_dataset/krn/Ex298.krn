@@ -1,0 +1,39 @@
+!!!COM:
+!!!OTL: Ex298
+!!!OMD: [quarter] = 90
+**kern
+*Trd-1c-2
+*clefG2
+*k[b-e-a-d-]
+*M4/4
+*MM90
+=1
+4a-
+4ff
+4cc
+4b-
+=2
+4cc
+4a-
+4r
+4f
+=3
+4c
+8e-L
+8fJ
+2r
+=4
+4cc
+4b-
+4a-
+4g
+=5
+4e-
+8b-L
+8a-
+8g
+8fJ
+4c
+==
+*-
+!! title: @{OTL}

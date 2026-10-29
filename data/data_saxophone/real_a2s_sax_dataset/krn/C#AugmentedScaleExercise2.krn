@@ -1,0 +1,38 @@
+!!!COM:
+!!!OTL: C# Augmented Scale Exercise 2
+!!!OMD: [quarter] = 100
+**kern
+*Trd-1c-2
+*clefG2
+*k[f#c#g#d#a#]
+*M2/4
+*MM100
+=1
+4B
+4d
+=2
+8d#L
+8f#J
+8gL
+8a#J
+=3
+16BL
+16dL
+16d#J
+16f#J
+16gL
+16a#L
+16bJ
+16ddJ
+=4
+4ff#
+4dd
+=5
+2b
+=6
+4g
+8bL
+8ddJ
+==
+*-
+!! title: @{OTL}
