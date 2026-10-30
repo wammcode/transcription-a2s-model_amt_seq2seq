@@ -105,7 +105,18 @@ class FixedEmbed(nn.Module):
 
         #     return self.embedding[i:i+1, :]
 
-        return self.embedding[inputs, :]
+        if inputs.numel() == 0 or int(inputs.max()) < self.embedding.size(0):
+            return self.embedding[inputs, :]
+        # Same sinusoidal function outside the original table. Keep the buffer
+        # shape unchanged so legacy state_dict files still load strictly.
+        half = self.features // 2
+        scale = -np.log(10000.0) / (half - 1)
+        # sinusoidal() computes frequencies in float64 before storing float32.
+        frequencies = torch.exp(torch.arange(half, device=inputs.device) * torch.tensor(scale, device=inputs.device))
+        angles = inputs[..., None] * frequencies
+        output = torch.zeros((*inputs.shape, self.features), device=inputs.device, dtype=self.embedding.dtype)
+        output[..., :half], output[..., half:2*half] = angles.sin(), angles.cos()
+        return output
 
 #Referenced https://github.com/huggingface/transformers/blob/v4.31.0/src/transformers/models/t5/modeling_t5.py#L238
 class LayerNorm(nn.Module):

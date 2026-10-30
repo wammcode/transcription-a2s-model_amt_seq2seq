@@ -1,0 +1,79 @@
+{
+  "split": "train",
+  "checkpoint_step": 600,
+  "samples": 3,
+  "valid_rate": 1.0,
+  "exact_match_rate": 1.0,
+  "byte_error_rate": 0.0,
+  "symbol_error_rate": 0.0,
+  "by_category": {
+    "fixed": {
+      "samples": 1,
+      "valid_rate": 1.0,
+      "exact_match_rate": 1.0,
+      "byte_error_rate": 0.0,
+      "symbol_error_rate": 0.0
+    },
+    "mono": {
+      "samples": 1,
+      "valid_rate": 1.0,
+      "exact_match_rate": 1.0,
+      "byte_error_rate": 0.0,
+      "symbol_error_rate": 0.0
+    },
+    "open": {
+      "samples": 1,
+      "valid_rate": 1.0,
+      "exact_match_rate": 1.0,
+      "byte_error_rate": 0.0,
+      "symbol_error_rate": 0.0
+    }
+  },
+  "examples": [
+    {
+      "valid": true,
+      "records": 7,
+      "max_spines": 1,
+      "quarter_length": "8",
+      "structural_rhythm_valid": true,
+      "verovio_rendered": true,
+      "id": "mono",
+      "category": "mono",
+      "exact_match": true,
+      "byte_edits": 0,
+      "reference_bytes": 62,
+      "symbol_edits": 0,
+      "reference_symbols": 30
+    },
+    {
+      "valid": true,
+      "records": 5,
+      "max_spines": 2,
+      "quarter_length": "8",
+      "structural_rhythm_valid": true,
+      "verovio_rendered": true,
+      "id": "fixed",
+      "category": "fixed",
+      "exact_match": true,
+      "byte_edits": 0,
+      "reference_bytes": 127,
+      "symbol_edits": 0,
+      "reference_symbols": 57
+    },
+    {
+      "valid": true,
+      "records": 6,
+      "max_spines": 3,
+      "quarter_length": "8",
+      "structural_rhythm_valid": true,
+      "verovio_rendered": true,
+      "id": "open",
+      "category": "open",
+      "exact_match": true,
+      "byte_edits": 0,
+      "reference_bytes": 104,
+      "symbol_edits": 0,
+      "reference_symbols": 58
+    }
+  ]
+}

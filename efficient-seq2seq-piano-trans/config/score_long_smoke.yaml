@@ -1,0 +1,25 @@
+# Reduced-size memorization check ONLY; use score_saxophone/score_long for research.
+model:
+  emb_dim: 64
+  num_heads: 2
+  head_dim: 32
+  num_encoder_layers: 2
+  num_decoder_layers: 2
+  mlp_dim: 128
+  dropout_rate: 0.0
+  pooling_sizes: [2, 1]
+  max_decode_length: 2048
+  attention_chunk_size: 128
+data:
+  n_frames: 128
+  variable_length: true
+  max_audio_seconds: 120
+  max_token_length: 2048
+  stft_backend: fft
+training:
+  cache_features: true
+  batch: 3
+  learning_rate: 0.002
+  weight_decay: 0.0
+  steps: 600
+  save_every: 600

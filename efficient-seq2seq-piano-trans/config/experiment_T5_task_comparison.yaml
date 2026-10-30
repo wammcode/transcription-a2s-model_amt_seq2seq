@@ -1,0 +1,11 @@
+# MIDI control matching the token-independent attention configuration of score.yaml.
+# Original V0--V4 configurations are unchanged.
+defaults:
+  - experiment_T5_V4_HierarchyPool
+  - _self_
+model:
+  hybrid_global_local_cross_attn: false
+  encoder_decoder_slide_window_size: 0
+  max_decode_length: 4096
+training:
+  notes: Matched_attention_audio_to_midi_control

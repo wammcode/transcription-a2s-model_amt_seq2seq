@@ -10,14 +10,11 @@ from model.Encoder import Encoder
 from model.Decoder import Decoder, CompoundDecoder
 from model.Layers import *
 from model.Mask import *
-from model.HPPNet import HPPNet
-from data.constants import *
 
 from torch.nn.utils.rnn import pad_sequence
 from config.utils import DictToObject
 
 from tqdm import tqdm
-from utils.log_memory_usage import profile_cuda_memory
 
 class Transformer(nn.Module):
     def __init__(self, config):
@@ -26,12 +23,26 @@ class Transformer(nn.Module):
         config.dtype = eval(config.dtype)
         # config.dtype = torch.float32 # 
         self.config = config
+        self.task = getattr(config, "task", "audio_to_midi")
+        if self.task == "audio_to_midi":
+            # Keep legacy IDs and state-dict names unchanged.
+            from data import constants
+            self.pad_token = constants.TOKEN_PAD
+            self.eos_token = constants.TOKEN_END
+            self.bos_token = constants.TOKEN_START
+        elif self.task == "audio_to_score":
+            self.pad_token, self.eos_token, self.bos_token = config.pad_token, config.eos_token, config.bos_token
+            if config.decoder_name != "TransformerDecoder" or getattr(config, "hybrid_global_local_cross_attn", False):
+                raise ValueError("Score tokens require the general TransformerDecoder output head")
+        else:
+            raise ValueError(f"Unknown task {self.task}")
         # select encoder
         if config.encoder_name == "TransformerEncoder":
             self.encoder = Encoder(config)
         elif config.encoder_name == "CNNEncoder":
             self.encoder = CNNEncoder(config)
         elif config.encoder_name == "HPPNetEncoder":
+            from model.HPPNet import HPPNet
             self.encoder = HPPNet(config)
         elif config.encoder_name == "hFT_Transformer_Encoder":
             self.encoder = hFT_Transformer_Encoder(config)
@@ -45,23 +56,33 @@ class Transformer(nn.Module):
 
         # select decoder
         # self.decoder = Decoder(config=config)
-        sub_token_names = [ t.get_class_name() for t in sm_tokenizer.token_type_list]
+        sub_token_names = [t.get_class_name() for t in constants.sm_tokenizer.token_type_list] if self.task == "audio_to_midi" else []
         
         if config.decoder_name == "TransformerDecoder":
             self.decoder = Decoder(config=config)
         elif config.decoder_name == "CompoundTransformerDecoder":
             self.decoder = CompoundDecoder(config=config, sub_token_names=sub_token_names)
 
-        self.pad_token = TOKEN_PAD
-        self.eos_token = TOKEN_END
         
     def encode(
             self, 
             encoder_input_tokens, 
             encoder_segment_ids=None, 
-            enable_dropout=True
+            enable_dropout=True,
+            encoder_lengths=None
             ):
         assert encoder_input_tokens.ndim == 3  # (batch, length, depth)
+
+        if self.task == "audio_to_score":
+            if encoder_segment_ids is not None:
+                raise ValueError("Packed score audio is not supported")
+            length = encoder_input_tokens.size(1)
+            if encoder_lengths is None:
+                encoder_lengths = torch.full((encoder_input_tokens.size(0),), length, device=encoder_input_tokens.device)
+            valid = torch.arange(length, device=encoder_input_tokens.device)[None] < encoder_lengths[:, None]
+            # Broadcast key-only mask; padded queries never enter loss or pooling.
+            encoded = self.encoder(encoder_input_tokens, valid[:, None, None, :], deterministic=not enable_dropout)
+            return encoded.masked_fill(~valid[..., None], 0)
 
         encoder_mask = make_attention_mask(
             torch.ones(encoder_input_tokens.shape[:-1]),
@@ -89,6 +110,22 @@ class Transformer(nn.Module):
         else:
             encoder_outputs = self.encoder(encoder_input_tokens, encoder_mask, deterministic=not enable_dropout)
         return encoder_outputs
+
+    def prepare_score_memory(self, encoded, encoder_lengths=None):
+        """Pool once per utterance and exclude padding from partial final groups."""
+        batch, time, dim = encoded.shape
+        if encoder_lengths is None:
+            encoder_lengths = torch.full((batch,), time, device=encoded.device)
+        valid = torch.arange(time, device=encoded.device)[None] < encoder_lengths[:, None]
+        sizes = self.config.pooling_sizes if getattr(self.config, "cross_attention_hierarchy_pooling", False) else [1]
+        memory, masks = {}, {}
+        for size in set(sizes):
+            pad = (-time) % size
+            weights = Functional.pad(valid, (0, pad)).view(batch, -1, size)
+            values = Functional.pad(encoded.masked_fill(~valid[..., None], 0), (0, 0, 0, pad)).view(batch, -1, size, dim)
+            memory[size] = values.sum(2) / weights.sum(2).clamp_min(1)[..., None]
+            masks[size] = weights.any(2)[:, None, None, :]
+        return memory, masks
     
     def decode(
             self, 
@@ -104,9 +141,24 @@ class Transformer(nn.Module):
             max_decode_length=None,
             use_preframe_tokens=True,
             decoder_targets_frame_index=None,
-            encoder_decoder_mask=None
+            encoder_decoder_mask=None,
+            encoder_lengths=None,
+            score_memory=None
             ):
         
+        if self.task == "audio_to_score":
+            memory, masks = score_memory if score_memory is not None else self.prepare_score_memory(encoded, encoder_lengths)
+            # Causality and local windows are applied inside Attention in bounded
+            # tiles. Target padding only needs a broadcast key mask.
+            decoder_mask = None if decode else (decoder_target_tokens != self.pad_token)[:, None, None, :]
+            pooled = getattr(self.config, "cross_attention_hierarchy_pooling", False)
+            return self.decoder(None if pooled else memory[1],
+                encoded_pooling_dict=memory if pooled else None,
+                pooled_masks=masks if pooled else None,
+                encoder_decoder_mask=None if pooled else masks[1],
+                decoder_input_tokens=decoder_input_tokens, decoder_positions=decoder_positions,
+                decoder_mask=decoder_mask, deterministic=not enable_dropout, decode=decode)
+
         encoder_decoder_mask_0 = encoder_decoder_mask
             
         # We use pooling to reduce decoder sequence length.
@@ -180,11 +232,15 @@ class Transformer(nn.Module):
         return decoder_output_dict
     
     def _shift_right(self, input_ids, shift_step=1):
-        BOS = TOKEN_START
+        BOS = self.bos_token
 
         shifted_input_ids = torch.zeros_like(input_ids)
         if shift_step is None:
-            shift_step = SEQUENCE_POOLING_SIZE
+            if self.task == "audio_to_midi":
+                from data.constants import SEQUENCE_POOLING_SIZE
+                shift_step = SEQUENCE_POOLING_SIZE
+            else:
+                shift_step = 1
         shifted_input_ids[..., shift_step:] = input_ids[..., :-shift_step].clone()
         shifted_input_ids[..., :shift_step] = BOS
 
@@ -203,18 +259,19 @@ class Transformer(nn.Module):
                 dur_inputs = None,
                 dur_targets = None,
                 decoder_targets_frame_index=None,
-                encoder_decoder_mask=None
+                encoder_decoder_mask=None,
+                encoder_lengths=None
     ):
         res_dict = {}
             
         if decoder_input_tokens == None:
             decoder_input_tokens = self._shift_right(decoder_target_tokens, shift_step=1)
             
-        encoder_outputs = self.encode(encoder_input_tokens, encoder_segment_ids=encoder_segment_ids, enable_dropout=enable_dropout)
+        encoder_outputs = self.encode(encoder_input_tokens, encoder_segment_ids=encoder_segment_ids, enable_dropout=enable_dropout, encoder_lengths=encoder_lengths)
         
         decoder_output_dict = self.decode(encoder_outputs, encoder_outputs, decoder_input_tokens, decoder_target_tokens, encoder_segment_ids=encoder_segment_ids, decoder_segment_ids=decoder_segment_ids, decoder_positions=decoder_positions, enable_dropout=enable_dropout, decode=decode, 
             decoder_targets_frame_index=decoder_targets_frame_index,
-            encoder_decoder_mask=encoder_decoder_mask)
+            encoder_decoder_mask=encoder_decoder_mask, encoder_lengths=encoder_lengths)
 
 
         res_dict.update(decoder_output_dict)
@@ -245,7 +302,12 @@ class Transformer(nn.Module):
         return gen_tokens[:, :i]
     
     # @profile_cuda_memory
-    def generate(self, encoder_inputs, target_seq_length = 1024, berak_on_eos=False, global_rank=0):
+    def generate(self, encoder_inputs, target_seq_length = 1024, berak_on_eos=False, global_rank=0, encoder_lengths=None):
+        if self.task == "audio_to_score":
+            from a2s.generation import generate
+            return generate(self, encoder_inputs, target_seq_length, encoder_lengths=encoder_lengths)
+        from data.constants import (TOKEN_PAD, TOKEN_START, TOKEN_BLANK, Tokenizer,
+                                    DEFAULT_SAMPLE_RATE, DEFAULT_HOP_WIDTH)
         self.decoder.initialize_decoder_cache()
         
         batch_size, T, n_mel = encoder_inputs.size()

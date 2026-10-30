@@ -9,11 +9,10 @@ from librosa.util import pad_center
 from scipy.signal import get_window
 from torch.autograd import Variable
 
-from .constants import *
 
 class STFT(torch.nn.Module):
     """adapted from Prem Seetharaman's https://github.com/pseeth/pytorch-stft"""
-    def __init__(self, filter_length, hop_length, win_length=None, window='hann'):
+    def __init__(self, filter_length, hop_length, win_length=None, window='hann', backend='conv'):
         super(STFT, self).__init__()
         if win_length is None:
             win_length = filter_length
@@ -23,6 +22,9 @@ class STFT(torch.nn.Module):
         self.win_length = win_length
         self.window = window
         self.forward_transform = None
+        if backend not in {"conv", "fft"}:
+            raise ValueError("STFT backend must be conv or fft")
+        self.backend = backend
         fourier_basis = np.fft.fft(np.eye(self.filter_length))
 
         cutoff = int((self.filter_length / 2 + 1))
@@ -42,8 +44,16 @@ class STFT(torch.nn.Module):
             forward_basis *= fft_window
 
         self.register_buffer('forward_basis', forward_basis.float())
+        self.register_buffer('fft_window', torch.as_tensor(get_window(window, win_length, fftbins=True)).float())
 
     def forward(self, input_data):
+        if self.backend == "fft":
+            # Identical Hann STFT, centering, reflect padding and normalization;
+            # FFT avoids the quadratic-in-FFT-size convolution implementation.
+            spectrum = torch.stft(input_data, n_fft=self.filter_length,
+                hop_length=self.hop_length, win_length=self.win_length, window=self.fft_window,
+                center=True, pad_mode="reflect", normalized=False, return_complex=True)
+            return spectrum.abs(), spectrum.angle()
         num_batches = input_data.size(0)
         num_samples = input_data.size(1)
 
@@ -73,9 +83,9 @@ class STFT(torch.nn.Module):
 
 class MelSpectrogram(torch.nn.Module):
     def __init__(self, n_mels, sample_rate, filter_length, hop_length,
-                 win_length=None, mel_fmin=0.0, mel_fmax=None):
+                 win_length=None, mel_fmin=0.0, mel_fmax=None, stft_backend="conv"):
         super(MelSpectrogram, self).__init__()
-        self.stft = STFT(filter_length, hop_length, win_length)
+        self.stft = STFT(filter_length, hop_length, win_length, backend=stft_backend)
 
         mel_basis = mel(sr=sample_rate, n_fft=filter_length, n_mels=n_mels, fmin=mel_fmin, fmax=mel_fmax, htk=True)
         mel_basis = torch.from_numpy(mel_basis).float()

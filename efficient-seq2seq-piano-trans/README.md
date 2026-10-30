@@ -2,6 +2,63 @@
 
 This is the repository for [Efficient Transformer-Based Piano Transcription With Sparse Attention Mechanisms](https://arxiv.org/abs/2509.09318).
 
+## Audio to MIDI / Audio to Score
+
+The entry points now accept `--task audio_to_midi` (default, original Hydra
+interface) or `--task audio_to_score` (direct generation of Humdrum **kern).
+The score task trains from scratch using the same acoustic frontend, Transformer
+encoder and autoregressive decoder classes. It does not convert predicted MIDI.
+
+See [the implementation, data contract, sources, limitations and commands](docs/audio_to_score.md)
+and [the executed verification report](docs/verification.md).
+
+Complete recordings now use variable lengths (120-second configurable guard),
+exact attention blocks with context, and one autoregressive score sequence.
+For the local Saxophone dataset, see [training and long-audio details](docs/saxophone_long_audio.md):
+
+```bash
+python -m a2s.import_data saxophone \
+  --root ../data/data_saxophone/real_a2s_sax_dataset --output outputs/saxophone
+python prepare.py --task audio_to_score --config config/score_saxophone.yaml \
+  --manifest outputs/saxophone/manifest.jsonl --fit-tokenizer outputs/saxophone/vocab.json \
+  --cache-dir outputs/saxophone/features --output outputs/saxophone/prepared.jsonl
+python train.py --task audio_to_score --config config/score_saxophone.yaml \
+  --tokenizer outputs/saxophone/vocab.json --manifest outputs/saxophone/prepared.jsonl \
+  --cache-dir outputs/saxophone/features --output outputs/saxophone/run
+python inference.py --task audio_to_score --checkpoint outputs/saxophone/run/best.pt \
+  --audio path/to/complete_recording.wav --output outputs/complete_score.krn
+```
+
+The full-size model retains six encoder and six decoder layers. Length buckets,
+gradient accumulation, mixed precision and disk feature caching control training
+cost. `score_long.yaml` provides the general large-corpus profile. No MIDI
+predictions or MIDI pretrained weights are used. This change does not establish
+transcription accuracy on unseen music; the executed learning checks memorize
+three real training pairs and synthetic examples.
+
+For a small synthetic check of all three polyphony cases:
+
+```bash
+pip install -r requirements-score.txt
+python examples/make_score_demo.py
+python prepare.py --task audio_to_score --config config/score_smoke.yaml \
+  --manifest outputs/score-demo/manifest.jsonl --output outputs/score-demo/prepared.jsonl
+python train.py --task audio_to_score --config config/score_smoke.yaml \
+  --manifest outputs/score-demo/prepared.jsonl --output outputs/score-overfit
+python inference.py --task audio_to_score --checkpoint outputs/score-overfit/latest.pt \
+  --audio outputs/score-demo/open.wav --output outputs/score-overfit/open.krn
+python evaluate.py --task audio_to_score --checkpoint outputs/score-overfit/latest.pt \
+  --manifest outputs/score-demo/prepared.jsonl --split train --output outputs/score-overfit/evaluation
+```
+
+This is a toy memorization check, not a trained real-world transcription system.
+Omit `--config config/score_smoke.yaml` to use the full six-layer configuration.
+`python -m pytest tests/test_score.py -q` tests the score pipeline;
+the complete `tests/` suite additionally requires the original MIDI dependencies.
+For the legacy entry points and full regression suite in a new environment,
+also install `pip install -r requirements-midi-tools.txt` with matching
+PyTorch/torchaudio/torchvision builds.
+
 ## Environment Requirement
 
 - PyTorch>=2.2

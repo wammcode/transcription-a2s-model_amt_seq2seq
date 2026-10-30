@@ -1,0 +1,25 @@
+# Full-size original Transformer, complete audio-score pairs up to 120 seconds.
+# Budget controls are explicit; no audio or target is silently truncated.
+model:
+  max_decode_length: 16384
+  attention_chunk_size: 128
+  gradient_checkpointing: true
+data:
+  variable_length: true
+  max_audio_seconds: 120
+  max_token_length: 16384
+  stft_backend: fft
+training:
+  batch: 4
+  max_batch_frames: 6500
+  max_batch_tokens: 18000
+  max_cross_product: 100000000
+  bucket_size: 128
+  gradient_accumulation: 4
+  num_workers: 2
+  precision: auto
+  warmup_steps: 1000
+  cosine_decay: true
+  min_lr_ratio: 0.1
+  label_smoothing: 0.0
+  cache_features: false

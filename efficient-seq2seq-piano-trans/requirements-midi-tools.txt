@@ -1,0 +1,23 @@
+# Missing utility dependencies of the legacy entry points and MIDI regression tests.
+# Install in addition to the original environment or requirements-score.txt.
+hydra-core>=1.3
+omegaconf>=2.3
+music21>=8
+pretty-midi>=0.2.9
+symusic
+partitura
+pandas
+scikit-learn
+editdistance
+line-profiler
+pytorch-memlab
+scalene
+mir-eval
+pypianoroll
+h5py
+pytorch-lightning>=2.2
+torchvision
+wandb
+tensorboard
+plotly
+tqdm

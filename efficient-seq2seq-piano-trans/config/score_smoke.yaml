@@ -1,0 +1,24 @@
+# Reduced width/depth ONLY for the executable smoke/overfit test.
+# The default score.yaml retains the original six-layer, 512-dim architecture.
+model:
+  emb_dim: 64
+  num_heads: 2
+  head_dim: 32
+  num_encoder_layers: 2
+  num_decoder_layers: 2
+  mlp_dim: 128
+  dropout_rate: 0.0
+  pooling_sizes: [2, 1]
+  max_decode_length: 512
+data:
+  n_frames: 128
+  max_token_length: 512
+  variable_length: false
+  stft_backend: conv
+training:
+  cache_features: true
+  batch: 3
+  learning_rate: 0.002
+  weight_decay: 0.0
+  steps: 600
+  save_every: 200

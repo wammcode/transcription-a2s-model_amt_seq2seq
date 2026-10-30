@@ -1,3 +1,7 @@
+if __name__ == "__main__":
+    from task_dispatch import dispatch
+    dispatch("inference")
+
 import os
 import sys
 import torch
@@ -35,7 +39,7 @@ def my_main(config: OmegaConf):
     if trainer is None:
         trainer = MT3Trainer(config)
         print("Loading model from checkpoint:", checkpoint_path)
-        state_dict = torch.load(checkpoint_path)
+        state_dict = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
         
         # Remove keys that are in the ignore list.
         for key in list(state_dict.keys()):
@@ -49,6 +53,7 @@ def my_main(config: OmegaConf):
     audio_path = config.audio_path
     
     wav, sr = torchaudio.load(audio_path)
+    wav = wav.to(device)
     # Merge channels if stereo.
     if wav.shape[0] > 1:
         wav = wav.to(device).mean(dim=0, keepdim=True)
@@ -81,7 +86,8 @@ def my_main(config: OmegaConf):
     num_batches = np.ceil( encoder_inputs.shape[0] / batch_size ).astype(int)
     notes_list = []
     max_seq_len = config.data.max_token_length
-    torch.cuda.synchronize("cuda")
+    if device == "cuda":
+        torch.cuda.synchronize("cuda")
     torch.cuda.empty_cache()
     gc.collect()
 
@@ -125,7 +131,7 @@ def my_main(config: OmegaConf):
         basename = os.path.basename(audio_path)
         midi_path = os.path.splitext(basename)[0] + ".output.mid"
         midi_path = os.path.join("outputs", midi_path)
-    os.makedirs(os.path.dirname(midi_path), exist_ok=True)
+    os.makedirs(os.path.dirname(midi_path) or ".", exist_ok=True)
     sm_tokenizer.save_midi(notes_list, midi_path)
     
 

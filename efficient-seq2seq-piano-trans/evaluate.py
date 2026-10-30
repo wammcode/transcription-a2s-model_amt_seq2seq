@@ -1,3 +1,7 @@
+if __name__ == "__main__":
+    from task_dispatch import dispatch
+    dispatch("evaluate")
+
 from train import MT3Trainer
 import hydra
 from omegaconf import OmegaConf

@@ -1,3 +1,7 @@
+if __name__ == "__main__":
+    from task_dispatch import dispatch
+    dispatch("train")
+
 import os
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
@@ -13,7 +17,6 @@ from omegaconf import OmegaConf
 import hydra
 from model.T5 import Transformer
 from model.HPPNet import HPPNet
-from model.GPT import GPT
 
 from data.dataset_Audio2Midi import Audio2Midi_Dataset
 import pytorch_lightning as pl

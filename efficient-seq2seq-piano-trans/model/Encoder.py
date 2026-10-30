@@ -5,6 +5,7 @@ Converted jax-based code https://github.com/magenta/mt3/blob/main/mt3/network.py
 import torch
 import torch.nn as nn
 import torch.nn.functional as Functional
+from torch.utils.checkpoint import checkpoint
 from model.Layers import *
 from model.Attention import Multi_Head_Attention, RelativeGlobalAttention
 
@@ -25,6 +26,7 @@ class EncoderLayer(nn.Module):
         else:
             raise "Unknown attention type: " + config.encoder_attention
         self.dropout1 = nn.Dropout(config.dropout_rate)
+        self.attention.chunk_size = getattr(config, "attention_chunk_size", 256)
         
         self.pre_mlp_layer_norm = LayerNorm(config.emb_dim)
         self.mlp = MlpBlock(emb_dim=config.emb_dim, intermediate_dim=config.mlp_dim, activations=config.mlp_activations, intermediate_dropout_rate=config.dropout_rate)
@@ -83,7 +85,10 @@ class Encoder(nn.Module):
 
         for layer in self.encoder_layers:
             # [batch, length, emb_dim] -> [batch, length, emb_dim]
-            x = layer(x, encoder_mask, deterministic)
+            if self.training and getattr(cfg, "gradient_checkpointing", False):
+                x = checkpoint(layer, x, encoder_mask, deterministic, use_reentrant=False)
+            else:
+                x = layer(x, encoder_mask, deterministic)
             
         x = self.layer_norm(x)
         x = self.dropout(x)

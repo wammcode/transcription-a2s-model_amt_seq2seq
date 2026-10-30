@@ -8,11 +8,13 @@ import torch.nn as nn
 from model.Layers import *
 from model.Mask import *
 import math
-from flash_attn import flash_attn_qkvpacked_func, flash_attn_func
+try:
+    from flash_attn import flash_attn_func
+except ImportError:
+    flash_attn_func = None
 
 
-from xformers.ops import memory_efficient_attention
-import xformers.ops.fmha.attn_bias as xformer_attn_bias
+# xformers is only needed by the optional, unused alternative backend.
 
 
 # from torch.nn.attention.flex_attention import flex_attention, create_block_mask
@@ -33,6 +35,7 @@ class Multi_Head_Attention(nn.Module):
         
         self.is_causal = is_causal
         self.window_size = window_size
+        self.chunk_size = 256
             
 
     def dot_product_attention(self, query, key, value, bias=None, deterministic=False):
@@ -73,11 +76,14 @@ class Multi_Head_Attention(nn.Module):
         query = query.to(torch.float16)
         key = key.to(torch.float16)
         value = value.to(torch.float16)
-        x = flash_attn_func(query, key, value, dropout_p=self.dropout_rate, window_size=window_size, causal=self.is_causal, deterministic=decode)
+        dropout_p = self.dropout_rate if self.training and not decode else 0.0
+        x = flash_attn_func(query, key, value, dropout_p=dropout_p, window_size=window_size, causal=self.is_causal, deterministic=decode)
         x = x.float()  # Convert back to float32
         return x
         
     def xformers_sliding_window_attention(self, query, key, value, dropout_p=0.0):
+        from xformers.ops import memory_efficient_attention
+        import xformers.ops.fmha.attn_bias as xformer_attn_bias
         assert self.window_size is not None, 'Sliding window attention requires a window size.'
         
         window_left = window_right = self.window_size // 2
@@ -105,12 +111,59 @@ class Multi_Head_Attention(nn.Module):
             delattr(self, 'cached_value')
         if hasattr(self, 'cache_index'):
             delattr(self, 'cache_index')
+        for name in ("static_key", "static_value"):
+            if hasattr(self, name):
+                delattr(self, name)
 
-    def forward(self, inputs_q, inputs_kv, mask=None, bias=None, decode=False, deterministic=False, return_attn_weights=False, sliding_window_size=None):
+    def block_attention(self, query, key, value, mask, dropout_p):
+        """Exact local/global SDPA, bounded temporary QK tiles; no N x N mask.
+
+        Blocks have a halo equal to the existing attention window. This is a
+        computational tiling of the original attention, not musical segmentation.
+        """
+        qlength, klength = query.size(1), key.size(1)
+        parts = []
+        causal_window = None if self.window_size is None else self.window_size - self.window_size % 2
+        for begin in range(0, qlength, self.chunk_size):
+            end = min(begin + self.chunk_size, qlength)
+            offset = klength - qlength
+            if self.window_size is not None:
+                left = causal_window if self.is_causal else self.window_size // 2
+                right = 0 if self.is_causal else self.window_size // 2
+                kbegin, kend = max(0, begin + offset - left), min(klength, end + offset + right)
+            else:
+                kbegin, kend = 0, klength
+            q = query[:, begin:end].transpose(1, 2)
+            k, v = key[:, kbegin:kend].transpose(1, 2), value[:, kbegin:kend].transpose(1, 2)
+            allowed = None
+            if self.window_size is not None or self.is_causal:
+                distance = (torch.arange(begin, end, device=q.device) + offset)[:, None] - torch.arange(kbegin, kend, device=q.device)
+                allowed = distance >= 0 if self.is_causal else distance.abs() <= self.window_size // 2
+                if self.is_causal and causal_window is not None:
+                    allowed = allowed & (distance <= causal_window)
+            if mask is not None:
+                selected = mask[..., :, kbegin:kend] if mask.size(-2) == 1 else mask[..., begin:end, kbegin:kend]
+                if selected.dtype == torch.bool:
+                    allowed = selected if allowed is None else selected & allowed
+                else:
+                    selected = selected.to(q.dtype)
+                    allowed = selected if allowed is None else selected.masked_fill(~allowed, -torch.inf)
+            x = F.scaled_dot_product_attention(q, k, v, attn_mask=allowed, dropout_p=dropout_p)
+            parts.append(x.transpose(1, 2))
+        return torch.cat(parts, dim=1)
+
+    def forward(self, inputs_q, inputs_kv, mask=None, bias=None, decode=False, deterministic=False, return_attn_weights=False, sliding_window_size=None, cache_kv=False):
         #In Original MT3, they initialize the parameter with query_init, using customized Dense Layer
         query = self.projection(inputs_q).view(inputs_q.size(0), inputs_q.size(1), self.num_heads, self.head_dim)
-        key = self.projection(inputs_kv).view(inputs_kv.size(0), inputs_kv.size(1), self.num_heads, self.head_dim)
-        value = self.projection(inputs_kv).view(inputs_kv.size(0), inputs_kv.size(1), self.num_heads, self.head_dim)
+        if cache_kv and hasattr(self, "static_key"):
+            key, value = self.static_key, self.static_value
+        else:
+            # The original model shares the Q/K/V projection. Avoid computing
+            # the same K/V projection twice, keeping parameters unchanged.
+            key = self.projection(inputs_kv).view(inputs_kv.size(0), inputs_kv.size(1), self.num_heads, self.head_dim)
+            value = key
+            if cache_kv:
+                self.static_key, self.static_value = key, value
 
         if decode:
             batch, length, num_heads, head_dim,  = key.size()
@@ -130,6 +183,8 @@ class Multi_Head_Attention(nn.Module):
                 cached_index = 0
             
             # Sliding window handling
+            if sliding_window_size is None and self.is_causal and self.window_size is not None:
+                sliding_window_size = self.window_size - self.window_size % 2 + 1
             if sliding_window_size is not None:
                 key = key[:, -sliding_window_size:, :, :]  # Use only the last `sliding_window_size` keys for decoding
                 value = value[:, -sliding_window_size:, :, :]  # Use only the last `sliding_window_size` values for decoding
@@ -156,18 +211,13 @@ class Multi_Head_Attention(nn.Module):
                     bias=attention_bias,
                     deterministic=deterministic)
         else:
-            dropout_p = self.dropout_rate if not decode else 0.0
-            if self.window_size is None:
-                # Faster implementation using PyTorch's built-in attention
-                query = query.permute(0, 2, 1, 3)  # (batch_size, num_heads, seq_len, head_dim)
-                key = key.permute(0, 2, 1, 3)
-                value = value.permute(0, 2, 1, 3)
-
-                x = F.scaled_dot_product_attention(query, key, value, attn_mask=attention_bias, dropout_p=dropout_p)
-                x = x.permute(0, 2, 1, 3)  # (batch_size, seq_len, num_heads, head_dim)
-            else:
+            dropout_p = self.dropout_rate if self.training and not decode else 0.0
+            # FlashAttention's fixed-length interface cannot honor padding masks.
+            # Use exact block SDPA for variable lengths (and CPU).
+            if self.window_size is not None and flash_attn_func is not None and query.is_cuda and mask is None and bias is None:
                 x = self.flash_attn_sliding_window_attention(query, key, value, decode=decode)
-                # x = self.xformers_sliding_window_attention(query, key, value, dropout_p=dropout_p)
+            else:
+                x = self.block_attention(query, key, value, attention_bias, dropout_p)
         
         out = self.output(x.reshape(x.size(0), x.size(1), x.size(2)*x.size(3)))
         

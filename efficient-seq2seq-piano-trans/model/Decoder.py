@@ -4,9 +4,9 @@ Converted jax-based code https://github.com/magenta/mt3/blob/main/mt3/network.py
 
 import torch
 import torch.nn as nn
+from torch.utils.checkpoint import checkpoint
 from model.Layers import *
 from model.Attention import Multi_Head_Attention
-from data.constants import *
 from model.Mask import make_sliding_window_mask
 
 class DecoderLayer(nn.Module):
@@ -23,6 +23,8 @@ class DecoderLayer(nn.Module):
 
         self.pre_cross_attention_layer_norm = LayerNorm(config.emb_dim)
         self.encoder_decoder_attention = Multi_Head_Attention(num_heads=config.num_heads, head_dim=config.head_dim, dropout_rate=config.dropout_rate)
+        self.self_attention.chunk_size = getattr(config, "attention_chunk_size", 256)
+        self.encoder_decoder_attention.chunk_size = getattr(config, "attention_chunk_size", 256)
         self.dropout2 = nn.Dropout(config.dropout_rate)
 
         self.pre_mlp_layer_norm = LayerNorm(config.emb_dim)
@@ -32,6 +34,7 @@ class DecoderLayer(nn.Module):
         
     def initialize_decoder_cache(self,):
         self.self_attention.initialize_decoder_cache()
+        self.encoder_decoder_attention.initialize_decoder_cache()
 
     def forward(self, inputs, encoded, decoder_mask=None, encoder_decoder_mask=None, decode=False, return_attn_weights=False, sliding_window_size=None, decoder_targets_frame_index=None):
         # self-attention
@@ -48,7 +51,8 @@ class DecoderLayer(nn.Module):
             if hasattr(self.config, "hybrid_global_local_cross_attn",) and self.config.hybrid_global_local_cross_attn:
                 y = self.hybrid_global_local_cross_attention(y, encoded, mask=encoder_decoder_mask, decode=decode, decoder_targets_frame_index=decoder_targets_frame_index)
             else:
-                y = self.encoder_decoder_attention(y, encoded, mask=encoder_decoder_mask)
+                y = self.encoder_decoder_attention(y, encoded, mask=encoder_decoder_mask,
+                    cache_kv=decode and getattr(self.config, "task", "audio_to_midi") == "audio_to_score")
         y = self.dropout2(y)
         y = y + x
 
@@ -132,8 +136,9 @@ class Decoder(nn.Module):
         super(Decoder, self).__init__()
         self.config = config
         
-        self.token_embed = Embed(config.vocab_size, config.emb_dim, one_hot=True)
-        self.fixed_embed = FixedEmbed(config.emb_dim)
+        self.token_embed = Embed(config.vocab_size, config.emb_dim,
+                                 one_hot=getattr(config, "task", "audio_to_midi") != "audio_to_score")
+        self.fixed_embed = FixedEmbed(config.emb_dim, max_length=getattr(config, "max_decode_length", 2048))
         self.dropout = nn.Dropout(config.dropout_rate)
         self.decoder_layers = nn.ModuleList([DecoderLayer(config, layer_idx=layer_idx) for layer_idx in range(config.num_decoder_layers)])
         self.layer_norm = LayerNorm(config.emb_dim)
@@ -147,7 +152,7 @@ class Decoder(nn.Module):
             layer.initialize_decoder_cache()
 
         
-    def forward(self, encoded, decoder_input_tokens, encoded_pooling_dict=None, decoder_positions=None, decoder_mask=None, encoder_decoder_mask=None, deterministic=False, decode=False, max_decode_length=None, decoder_targets_frame_index=None):
+    def forward(self, encoded, decoder_input_tokens, encoded_pooling_dict=None, decoder_positions=None, decoder_mask=None, encoder_decoder_mask=None, deterministic=False, decode=False, max_decode_length=None, decoder_targets_frame_index=None, pooled_masks=None):
         cfg = self.config
         assert decoder_input_tokens.ndim == 2  # [batch, len]
         res_dict = {}
@@ -174,13 +179,19 @@ class Decoder(nn.Module):
                 assert encoded is None, "encoded should be None when using encoded_pooling_dict"
                 pooling_size = self.config.pooling_sizes[layer_idx]
                 encoded_i = encoded_pooling_dict[pooling_size]  # [batch, encoded_length//pooling, emb_dim]
-                if encoder_decoder_mask_i is not None:
+                if pooled_masks is not None:
+                    encoder_decoder_mask_i = pooled_masks[pooling_size]
+                elif encoder_decoder_mask_i is not None:
                     encoder_decoder_mask_i = encoder_decoder_mask_i[:, :, :seq_length, ::pooling_size]  # [batch, num_heads, length, encoded_length//pooling]
             
             if encoder_decoder_mask_i is not None:
                 encoder_decoder_mask_i = encoder_decoder_mask_i[:, :, :seq_length, :encoded_i.size(1)]  # [batch, num_heads, length, encoded_length]
 
-            y = layer(y, encoded_i, decoder_mask=decoder_mask, encoder_decoder_mask=encoder_decoder_mask_i, decode=decode, decoder_targets_frame_index=decoder_targets_frame_index)
+            if self.training and getattr(cfg, "gradient_checkpointing", False) and not decode:
+                y = checkpoint(layer, y, encoded_i, decoder_mask, encoder_decoder_mask_i,
+                               use_reentrant=False)
+            else:
+                y = layer(y, encoded_i, decoder_mask=decoder_mask, encoder_decoder_mask=encoder_decoder_mask_i, decode=decode, decoder_targets_frame_index=decoder_targets_frame_index)
             
             if hasattr(self.config, "get_encder_decoder_attention_weights") and self.config.get_encder_decoder_attention_weights:
                 res_dict[f"decoder_layer_cross_attention_weights_{layer_idx}"] = None  # Save attention weights for each layer
@@ -228,7 +239,7 @@ class CompoundDecoder(nn.Module):
         self.decoder_type = decoder_type
         
         self.token_embed = Embed(config.vocab_size, config.emb_dim, one_hot=True)
-        self.fixed_embed = FixedEmbed(config.emb_dim)
+        self.fixed_embed = FixedEmbed(config.emb_dim, max_length=getattr(config, "max_decode_length", 2048))
         self.dropout = nn.Dropout(config.dropout_rate)
         if decoder_layer_num is None:
             decoder_layer_num = config.num_decoder_layers

@@ -1,0 +1,51 @@
+task: audio_to_score
+model:
+  task: audio_to_score
+  model_name: Transformer-T5
+  encoder_name: TransformerEncoder
+  decoder_name: TransformerDecoder
+  encoder_attention: Multi_Head_Attention
+  encoder_input_dim: 512
+  emb_dim: 512
+  num_heads: 8
+  head_dim: 64
+  num_encoder_layers: 6
+  num_decoder_layers: 6
+  mlp_dim: 1024
+  mlp_activations: relu
+  dropout_rate: 0.1
+  dtype: torch.float32
+  froze_encoder: false
+  encoder_window_size: 64
+  decoder_window_size: 64
+  hybrid_global_local_cross_attn: false
+  encoder_decoder_slide_window_size: 0
+  cross_attention_hierarchy_pooling: true
+  pooling_sizes: [4, 4, 2, 2, 1, 1]
+  vocab_size: 259
+  pad_token: 0
+  bos_token: 1
+  eos_token: 2
+  max_decode_length: 4096
+data:
+  features: mel
+  amplitude_to_db: false
+  sample_rate: 16000
+  hop_length: 320
+  fft_size: 2048
+  num_mel_bins: 512
+  mel_fmin: 20.0
+  mel_fmax: 7600.0
+  n_frames: 512
+  max_token_length: 4096
+  # Whole recordings by default. n_frames only controls legacy fixed clips.
+  variable_length: true
+  max_audio_seconds: 120
+  stft_backend: fft
+training:
+  batch: 4
+  learning_rate: 0.0001
+  weight_decay: 0.01
+  steps: 200000
+  save_every: 1000
+  seed: 1234
