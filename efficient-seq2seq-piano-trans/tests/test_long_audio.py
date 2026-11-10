@@ -230,3 +230,50 @@ def test_evaluation_compares_scores_not_tokenization_choices(tmp_path, monkeypat
     report = json.loads((tmp_path / "eval/metrics.json").read_text())
     assert report["exact_match_rate"] == 1 and report["symbol_error_rate"] == 0
     assert not any(row["token_exact_match"] for row in report["examples"])
+
+
+def test_batched_greedy_generation_matches_individual_audio():
+    torch.manual_seed(10)
+    model = Transformer(small_long()["model"]).eval()
+    inputs = [torch.randn(35, 512), torch.randn(57, 512)]
+    together = model.generate(torch.nn.utils.rnn.pad_sequence(inputs, batch_first=True), 9,
+                              encoder_lengths=torch.tensor([35, 57]))
+    for index, audio in enumerate(inputs):
+        alone = model.generate(audio[None], 9)[0]
+        assert torch.equal(together[index, :len(alone)], alone)
+
+
+def test_batched_evaluation_preserves_invalid_outputs_and_test_split(tmp_path, monkeypatch):
+    from a2s.cli import evaluate
+    manifest = make_demo(tmp_path / "demo")
+    rows = [json.loads(line) for line in manifest.read_text().splitlines()]
+    for row in rows:
+        row["split"] = "train" if row["id"] == "fixed" else "test"
+    manifest.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    texts = [(tmp_path / "demo" / f"{name}.krn").read_text() for name in ("mono", "open")]
+    tokenizer = KernTokenizer()
+    valid = torch.tensor(tokenizer.encode(texts[0]))
+    truncated = torch.tensor(tokenizer.encode(texts[1])[:-1])
+    predictions = torch.nn.utils.rnn.pad_sequence([valid, truncated], batch_first=True)
+    def generate(acoustic, target_seq_length, encoder_lengths):
+        assert acoustic.size(0) == 2
+        assert encoder_lengths.numel() == 2
+        return predictions
+    model = SimpleNamespace(generate=generate, eval=lambda: None)
+    cfg = small_long()
+    monkeypatch.setattr("a2s.cli.load_checkpoint", lambda *args: (
+        model, {"config": cfg, "tokenizer": tokenizer.metadata(), "step": 7}))
+    output = tmp_path / "predictions"
+    evaluate(SimpleNamespace(checkpoint="unused", device="cpu", manifest=str(manifest), split="test",
+                             output=str(output), batch_size=2, max_batch_frames=1000, cache_dir=None))
+    reports = [json.loads(line) for line in (output / "examples.jsonl").read_text().splitlines()]
+    assert [r["id"] for r in reports] == ["mono", "open"]
+    assert reports[0]["valid"] and reports[0]["ended_with_eos"]
+    assert not reports[1]["valid"] and not reports[1]["ended_with_eos"]
+    assert (output / "raw/mono.krn").read_text() == texts[0]
+    assert (output / "raw/open.krn").read_text() == texts[1]
+    assert not (output / "open.krn").exists()
+    assert (output / "open.krn.invalid.json").exists()
+    metrics = json.loads((output / "metrics.json").read_text())
+    assert metrics["samples"] == 2 and metrics["valid_rate"] == .5
+    assert json.loads((output / "progress.json").read_text())["predicted"] == 2

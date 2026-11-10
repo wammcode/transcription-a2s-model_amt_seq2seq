@@ -25,13 +25,23 @@ def duration(token):
     return Fraction(0) if "q" in token or "Q" in token else value
 
 
-def validate(text, external=False):
+def validate(text, external=False, strict_rhythm=True):
+    """Validate structure and notation, optionally reporting reference rhythm issues.
+
+    Generation always uses the strict default. Reference corpora can retain
+    inconsistent original timings without rewriting or dropping their labels.
+    """
     spines, next_root, records, max_spines = [], 0, 0, 0
+    rhythm_warnings, events = [], 0
     saw_header = ended = False
     now = Fraction(0)
     for lineno, line in enumerate(text.splitlines(), 1):
         def fail(message):
             raise ValueError(f"**kern line {lineno}: {message}")
+        def rhythm_issue(message):
+            if strict_rhythm:
+                fail(message)
+            rhythm_warnings.append(f"**kern line {lineno}: {message}")
         if not line or line.startswith("!!"):
             continue
         if any(ord(c) < 32 and c != "\t" for c in line):
@@ -88,13 +98,13 @@ def validate(text, external=False):
                     if len(group) < 2 or len({s.root for s in group}) != 1:
                         fail("merge requires adjacent branches of the same staff")
                     if any(s.remaining for s in group):
-                        fail("merge before notes have ended")
+                        rhythm_issue("merge before notes have ended")
                     result.append(replace(s))
                     i = j
                     continue
                 if c == "*-":
                     if s.remaining:
-                        fail("termination before note has ended")
+                        rhythm_issue("termination before note has ended")
                 else:
                     result.append(s)
                     if c == "*^":
@@ -117,10 +127,10 @@ def validate(text, external=False):
         for cell, spine in zip(cells, spines):
             if cell == ".":
                 if spine.remaining == 0 and not grace:
-                    fail("null token without a sustaining event")
+                    rhythm_issue("null token without a sustaining event")
                 continue
             if spine.remaining:
-                fail("new event overlaps a sustaining event in its voice")
+                rhythm_issue("new event overlaps a sustaining event in its voice")
             members = cell.split(" ")
             if any(not m for m in members):
                 fail("empty chord member")
@@ -133,24 +143,36 @@ def validate(text, external=False):
                 # are not silently accepted as musical events.
                 if re.search(r"[^0-9a-gA-GrqQ#n%\.\-\[\]_(){}<>/\\;,:'\"`~^vLJKklyYzZtTmMsSxXoONiIPV+!?@&|=]", member):
                     fail(f"unsupported note signifier: {member}")
-                lengths.append(duration(member))
+                try:
+                    lengths.append(duration(member))
+                except ValueError as exc:
+                    # Some reference labels omit reciprocal durations. Keep the
+                    # original token and mark timing as unknown in the report.
+                    if strict_rhythm:
+                        raise
+                    rhythm_issue(str(exc))
+                    lengths.append(Fraction(0))
             if len(set(lengths)) != 1:
                 fail("mixed-duration chord: encode independent durations as voices")
             if len(members) > 1 and any("r" in m for m in members):
                 fail("rest in a chord")
             spine.remaining = lengths[0]
+            events += 1
         if not grace:
             if not any(s.remaining for s in spines):
-                fail("data record has no rhythmic event")
-            delta = min(s.remaining for s in spines if s.remaining)
+                rhythm_issue("data record has no rhythmic event")
+            delta = min((s.remaining for s in spines if s.remaining), default=Fraction(0))
             for s in spines:
                 s.remaining = max(Fraction(0), s.remaining - delta)
             now += delta
         records += 1
-    if not saw_header or not ended or not records:
+    if not saw_header or not ended or not records or not events:
         raise ValueError("Expected complete, nonempty **kern score with spine terminators")
-    report = {"records": records, "max_spines": max_spines, "quarter_length": str(now),
-              "structural_rhythm_valid": True}
+    report = {"records": records, "max_spines": max_spines,
+              "quarter_length": None if rhythm_warnings else str(now),
+              "structural_rhythm_valid": not rhythm_warnings}
+    if rhythm_warnings:
+        report["rhythm_warnings"] = rhythm_warnings
     if external:
         import verovio
         toolkit = verovio.toolkit()

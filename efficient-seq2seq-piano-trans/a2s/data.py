@@ -88,7 +88,8 @@ class ScoreDataset(Dataset):
         self.reports, self.token_lengths, self.frame_lengths, self.score_hashes = [], [], [], []
         for item in self.entries:
             text = Path(item["score"]).read_text(encoding="utf-8")
-            report = validate(text, external=external)
+            report = validate(text, external=external,
+                              strict_rhythm=config.get("strict_score_rhythm", True))
             tokens = self.tokenizer.encode(text)
             if len(tokens) > config["max_token_length"]:
                 raise ValueError(f"{item['id']}: {len(tokens)} tokens exceed max_token_length; do not truncate scores")

@@ -1,6 +1,7 @@
-"""Import complete paired local Saxophone folders.
+"""Import complete paired local Saxophone or Quartets folders.
 
     python -m a2s.import_data saxophone --root ... --output outputs/saxophone
+    python -m a2s.import_data quartets --root ... --output outputs/quartets
 
 Sources are never modified; partitions are retained. No MIDI is used.
 """
@@ -24,7 +25,7 @@ def write_manifest(entries, output):
     return path
 
 
-def saxophone(root, output, score_dir="krn_clean", audio_dir="wav", partitions_dir="a2s_partitions"):
+def paired_corpus(root, output, score_dir, audio_dir, partitions_dir, category):
     root = Path(root).resolve()
     entries = []
     for source_split, split in [("train", "train"), ("val", "validation"), ("test", "test")]:
@@ -39,23 +40,32 @@ def saxophone(root, output, score_dir="krn_clean", audio_dir="wav", partitions_d
             info = sf.info(audio)
             ident = re.sub(r"[^A-Za-z0-9_-]", "_", Path(audio_name).stem) + "-" + hashlib.sha256(audio_name.encode()).hexdigest()[:8]
             entries.append({"id": ident, "piece_id": Path(score_name).stem, "split": split,
-                            "category": "mono", "audio": str(audio), "score": str(score),
+                            "category": category, "audio": str(audio), "score": str(score),
                             "start": 0, "end": info.duration})
     return write_manifest(entries, output)
+
+
+def saxophone(root, output, score_dir="krn_clean", audio_dir="wav", partitions_dir="a2s_partitions"):
+    return paired_corpus(root, output, score_dir, audio_dir, partitions_dir, "mono")
+
+
+def quartets(root, output, score_dir="krn_clean", audio_dir="wav", partitions_dir="a2s_partitions/quartets"):
+    return paired_corpus(root, output, score_dir, audio_dir, partitions_dir, "fixed")
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    local = commands.add_parser("saxophone")
-    local.add_argument("--root", required=True)
-    local.add_argument("--output", required=True)
-    local.add_argument("--score-dir", default="krn_clean")
-    local.add_argument("--audio-dir", default="wav")
-    local.add_argument("--partitions-dir", default="a2s_partitions")
+    for name, partitions in [("saxophone", "a2s_partitions"), ("quartets", "a2s_partitions/quartets")]:
+        local = commands.add_parser(name)
+        local.add_argument("--root", required=True)
+        local.add_argument("--output", required=True)
+        local.add_argument("--score-dir", default="krn_clean")
+        local.add_argument("--audio-dir", default="wav")
+        local.add_argument("--partitions-dir", default=partitions)
     args = vars(parser.parse_args())
     command = args.pop("command")
-    {"saxophone": saxophone}[command](**args)
+    {"saxophone": saxophone, "quartets": quartets}[command](**args)
 
 
 if __name__ == "__main__":

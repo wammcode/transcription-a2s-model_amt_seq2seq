@@ -2,6 +2,7 @@
 import argparse
 import json
 from pathlib import Path
+import time
 
 import soundfile as sf
 import torch
@@ -48,6 +49,9 @@ def parser(command):
         p.add_argument("--checkpoint", required=True)
         p.add_argument("--split", default="test", choices=["train", "validation", "test"])
         p.add_argument("--output", required=True, help="Evaluation directory")
+        p.add_argument("--batch-size", type=int, default=1)
+        p.add_argument("--max-batch-frames", type=int, default=32000)
+        p.add_argument("--cache-dir", help="Read existing log-mels; cache misses are computed without modifying the cache")
     return p
 
 
@@ -81,7 +85,9 @@ def prepare(args):
     write_json(str(path) + ".validation.json", report)
     write_json(str(path) + ".tokenizer.json", tokenizer.metadata())
     print(json.dumps({split: {"samples": len(rows), "max_frames": max(r["frames"] for r in rows),
-                             "max_tokens": max(r["tokens"] for r in rows)} for split, rows in report.items()}, indent=2))
+                             "max_tokens": max(r["tokens"] for r in rows),
+                             "rhythm_inconsistencies": sum(not r["structural_rhythm_valid"] for r in rows)}
+                      for split, rows in report.items()}, indent=2))
 
 
 def train(args):
@@ -141,32 +147,89 @@ def symbols(text):
     return text.replace("\t", " <tab> ").replace("\n", " <nl> ").split()
 
 
+@torch.inference_mode()
 def evaluate(args):
+    batch_size = getattr(args, "batch_size", 1)
+    max_frames = getattr(args, "max_batch_frames", 32000)
+    if batch_size < 1 or max_frames < 1:
+        raise ValueError("Prediction batch size and frame budget must be positive")
+    output = Path(args.output)
+    output.mkdir(parents=True, exist_ok=True)
+    if (output / "examples.jsonl").exists():
+        raise ValueError("Evaluation output already contains predictions; use a new directory")
+    (output / "raw").mkdir(exist_ok=True)
     model, checkpoint = load_checkpoint(args.checkpoint, args.device)
     cfg = checkpoint["config"]
     tokenizer = tokenizer_from_metadata(checkpoint["tokenizer"])
     dataset = ScoreDataset(args.manifest, cfg["data"], args.split, external=True, tokenizer=tokenizer)
     extractor = frontend(cfg, args.device)
+    cache_dir = getattr(args, "cache_dir", None)
+    cache = FeatureDataset(dataset, cache_dir) if cache_dir else None
     model.eval()
     results = []
-    for index in range(len(dataset)):
-        audio, target, name = dataset[index]
-        predicted = model.generate(features(extractor, audio[None].to(args.device)),
-                                   target_seq_length=cfg["data"]["max_token_length"])[0].tolist()
-        report = serialize_prediction(predicted, Path(args.output) / (name + ".krn"), tokenizer=tokenizer)
-        # Count invalid and truncated predictions too; never evaluate only successes.
-        raw_ids = predicted[:predicted.index(2)] if 2 in predicted else predicted
-        raw_bytes = b"".join(tokenizer.token_bytes(t) for t in raw_ids if t >= 3)
-        raw = raw_bytes.decode("utf-8", errors="replace")
-        truth = tokenizer.decode(target.tolist())
-        reference_symbols = symbols(truth)
-        report.update(id=name, category=dataset.entries[index].get("category", "unspecified"),
-                      exact_match=report["valid"] and raw == truth,
-                      token_exact_match=predicted == target.tolist(),
-                      byte_edits=edit_distance(raw_bytes, truth.encode()), reference_bytes=len(truth.encode()),
-                      symbol_edits=edit_distance(symbols(raw), reference_symbols), reference_symbols=len(reference_symbols))
-        report.pop("tokens", None)
-        results.append(report)
+    order = list(range(len(dataset)))
+    if batch_size > 1:
+        # Bucket using audio lengths only; reference tokens never guide generation.
+        order.sort(key=lambda i: dataset.frame_lengths[i])
+    batches, current = [], []
+    for index in order:
+        if current and (len(current) == batch_size or
+                        (len(current) + 1) * max(dataset.frame_lengths[i] for i in current + [index]) > max_frames):
+            batches.append(current)
+            current = []
+        current.append(index)
+    if current:
+        batches.append(current)
+    started = time.monotonic()
+    print(json.dumps({"phase": "predict", "split": args.split, "samples": len(dataset),
+                      "checkpoint_step": checkpoint["step"], "batch_size": batch_size,
+                      "max_tokens": cfg["data"]["max_token_length"], "precision": "fp32"}), flush=True)
+    with (output / "examples.jsonl").open("x") as stream:
+        for indices in batches:
+            acoustic = []
+            for index in indices:
+                if cache is not None and cache.cache_path(index).is_file():
+                    acoustic.append(cache.get_features(index))
+                else:
+                    audio = dataset[index][0]
+                    acoustic.append(features(extractor, audio[None].to(args.device))[0].cpu())
+            lengths = torch.tensor([x.size(0) for x in acoustic], device=args.device)
+            x = torch.nn.utils.rnn.pad_sequence(acoustic, batch_first=True).to(args.device)
+            predictions = model.generate(x, target_seq_length=cfg["data"]["max_token_length"],
+                                         encoder_lengths=lengths).tolist()
+            del x, acoustic
+            for index, predicted in zip(indices, predictions):
+                name = dataset.entries[index]["id"]
+                # Remove batch padding after EOS while retaining the EOS itself.
+                if tokenizer.EOS in predicted:
+                    predicted = predicted[:predicted.index(tokenizer.EOS) + 1]
+                report = serialize_prediction(predicted, output / (name + ".krn"), tokenizer=tokenizer)
+                # Preserve every unmodified prediction, including invalid/truncated ones.
+                raw_ids = predicted[:-1] if predicted and predicted[-1] == tokenizer.EOS else predicted
+                raw_bytes = b"".join(tokenizer.token_bytes(t) for t in raw_ids if t >= 3)
+                raw_path = Path("raw") / (name + ".krn")
+                (output / raw_path).write_bytes(raw_bytes)
+                raw = raw_bytes.decode("utf-8", errors="replace")
+                target = dataset.target(index).tolist()
+                truth = tokenizer.decode(target)
+                reference_symbols = symbols(truth)
+                entry = dataset.entries[index]
+                report.update(id=name, audio=entry["audio"], reference_score=entry["score"],
+                              raw_prediction=str(raw_path), category=entry.get("category", "unspecified"),
+                              generated_tokens=len(predicted), ended_with_eos=bool(predicted and predicted[-1] == tokenizer.EOS),
+                              exact_match=report["valid"] and raw == truth,
+                              token_exact_match=predicted == target,
+                              byte_edits=edit_distance(raw_bytes, truth.encode()), reference_bytes=len(truth.encode()),
+                              symbol_edits=edit_distance(symbols(raw), reference_symbols), reference_symbols=len(reference_symbols))
+                report.pop("tokens", None)
+                write_json(output / (name + ".report.json"), report)
+                stream.write(json.dumps(report) + "\n")
+                stream.flush()
+                results.append(report)
+            progress = {"split": args.split, "predicted": len(results), "total": len(dataset),
+                        "valid": sum(r["valid"] for r in results), "seconds": round(time.monotonic() - started, 2)}
+            write_json(output / "progress.json", progress)
+            print(json.dumps(progress), flush=True)
     def summarize(rows):
         return {"samples": len(rows), "valid_rate": sum(r["valid"] for r in rows) / len(rows),
                 "exact_match_rate": sum(r["exact_match"] for r in rows) / len(rows),
@@ -176,7 +239,7 @@ def evaluate(args):
               "by_category": {k: summarize([r for r in results if r["category"] == k]) for k in sorted({r["category"] for r in results})},
               "examples": results}
     write_json(Path(args.output) / "metrics.json", report)
-    print(json.dumps(report, indent=2))
+    print(json.dumps({k: v for k, v in report.items() if k != "examples"}, indent=2))
 
 
 def main(command, argv=None):
