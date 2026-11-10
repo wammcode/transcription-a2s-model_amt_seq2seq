@@ -1,0 +1,13 @@
+{
+  "job_id": 110427,
+  "task": "audio_to_midi",
+  "dataset": "quartets",
+  "submitted_at": "2026-11-02T09:53:52.969497+01:00",
+  "partition": "dgx",
+  "gpu_request": "gpu:a100-40gb:1",
+  "run_directory": "efficient-seq2seq-piano-trans/outputs/audio_to_midi/quartets/slurm-110427",
+  "automatic_test_inference": true,
+  "resubmission_of": 108467,
+  "previous_failure": "Permission denied reading /usr/local/bin/train-a2m; no training or inference ran",
+  "fix": "Set image launcher mode to 0755; check launcher access with training UID/GID before preparation"
+}

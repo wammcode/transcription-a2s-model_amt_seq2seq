@@ -1,0 +1,33 @@
+# Overrides of config/score.yaml for the original Quartets audio-score pairs.
+model:
+  froze_encoder: false
+  checkpoint_path: null
+  max_decode_length: 16384
+  attention_chunk_size: 128
+  gradient_checkpointing: true
+data:
+  # Preserve original Quartets labels; report existing rhythm inconsistencies.
+  # Structural/token checks and Verovio remain enabled; generation stays strict.
+  strict_score_rhythm: false
+  variable_length: true
+  max_audio_seconds: 120
+  max_token_length: 16384
+  stft_backend: fft
+training:
+  batch: 4
+  max_batch_frames: 6500
+  max_batch_tokens: 18000
+  max_cross_product: 100000000
+  bucket_size: 128
+  gradient_accumulation: 4
+  num_workers: 2
+  precision: auto
+  warmup_steps: 250
+  steps: 10000
+  # Quartets has 6,089 validation pairs; avoid a full validation every 100 steps.
+  save_every: 500
+  cosine_decay: true
+  min_lr_ratio: 0.1
+  label_smoothing: 0.0
+  cache_features: false
+  early_stopping_patience: 20

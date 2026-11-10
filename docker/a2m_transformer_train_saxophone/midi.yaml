@@ -1,0 +1,20 @@
+# Merged over the original config/main_config.yaml (T5 V4 HierarchyPool).
+model:
+  task: audio_to_midi
+  checkpoint_path: null
+  checkpoint_ignore_layres: []
+  froze_encoder: false
+  strict_checkpoint: true
+training:
+  seed: 42
+  batch: 4
+  accumulate_grad_batches: 4
+  batch_inference: 4
+  num_workers: 2
+  learning_rate: 0.0001
+  training_steps: 10000
+  validate_every: 100
+  patience: 20
+  # Stop training gracefully after 30h, leaving 18h for test inference in dgx.
+  max_time: '1:06:00:00'
+  online_testing: false
